@@ -72,7 +72,7 @@ export default function ShadeTimeline({
         Shady {formatMinutes(summary.shadedMinutes)} of {formatMinutes(daylightMinutes)} daylight · Selling hours (11 AM–7 PM): {formatMinutes(summary.windowShadedMinutes)} shady · Best shady window {bestWindow}
       </p>
       <div className="mt-5 overflow-x-auto pb-1">
-        <div className="relative min-w-[560px] pb-5">
+        <div className="relative min-w-[320px] pb-5">
           <div className="flex" aria-label="15-minute sun and shade timeline">
             {samples.slice(0, -1).map((sample, index) => (
               <button
