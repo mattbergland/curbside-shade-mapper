@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Building } from "./buildings";
 import { computeShade, isInsideBuilding } from "./shade";
 import { getSunSamples } from "./sun";
+import { hourIn, zonedDate } from "./time";
 
 const spot = { lat: 40.7, lng: -74 };
 const metersToLng = (meters: number) =>
@@ -33,12 +34,18 @@ const northBuilding: Building = {
 };
 
 function noonSample(date: string) {
-  return getSunSamples(new Date(`${date}T17:00:00Z`), spot.lat, spot.lng, 60).find(
-    (sample) => Math.abs(sample.time.getTime() - new Date(`${date}T17:00:00Z`).getTime()) < 30 * 60_000,
+  return getSunSamples(date, spot.lat, spot.lng, "America/New_York", 60).find(
+    (sample) => Math.abs(sample.time.getTime() - zonedDate(date, 12, "America/New_York").getTime()) < 30 * 60_000,
   )!;
 }
 
 describe("computeShade", () => {
+  it("converts local wall-clock time to the right UTC instant", () => {
+    const noon = zonedDate("2026-06-21", 12, "America/New_York");
+    expect(noon.toISOString()).toBe("2026-06-21T16:00:00.000Z");
+    expect(hourIn(noon, "America/New_York")).toBe(12);
+  });
+
   it("does not shade at summer noon when the sun is high", () => {
     const result = computeShade(spot, [southBuilding], [noonSample("2026-06-21")]);
     expect(result[0].shaded).toBe(false);
@@ -58,7 +65,7 @@ describe("computeShade", () => {
   });
 
   it("keeps every sample sunny without buildings", () => {
-    const samples = getSunSamples(new Date("2026-06-21T17:00:00Z"), spot.lat, spot.lng);
+    const samples = getSunSamples("2026-06-21", spot.lat, spot.lng, "America/New_York");
     expect(computeShade(spot, [], samples).every((sample) => sample.sun)).toBe(true);
   });
 

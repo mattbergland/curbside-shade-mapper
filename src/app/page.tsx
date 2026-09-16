@@ -8,6 +8,7 @@ import { Building } from "@/lib/buildings";
 import { DEMO_SPOT, SAMPLE_BUILDINGS } from "@/lib/sampleData";
 import { computeShade, isInsideBuilding, ShadeSample, ShadeSummary, summarize } from "@/lib/shade";
 import { getSunSamples } from "@/lib/sun";
+import { timeZoneFor } from "@/lib/time";
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
 
@@ -21,11 +22,14 @@ export default function Home() {
   const [spot, setSpot] = useState<Spot>();
   const [date, setDate] = useState(today);
   const [buildings, setBuildings] = useState<Building[]>([]);
+  const [retryCount, setRetryCount] = useState(0);
+  const [sampleReason, setSampleReason] = useState<"demo" | "fallback">();
+  const timeZone = useMemo(() => (spot ? timeZoneFor(spot.lat, spot.lng) : "UTC"), [spot]);
   const samples = useMemo<ShadeSample[]>(() => {
     if (!spot) return [];
-    return computeShade(spot, buildings, getSunSamples(new Date(`${date}T12:00:00`), spot.lat, spot.lng));
-  }, [spot, date, buildings]);
-  const summary = useMemo<ShadeSummary>(() => summarize(samples), [samples]);
+    return computeShade(spot, buildings, getSunSamples(date, spot.lat, spot.lng, timeZone));
+  }, [spot, date, buildings, timeZone]);
+  const summary = useMemo<ShadeSummary>(() => summarize(samples, { dateStr: date, tz: timeZone }), [samples, date, timeZone]);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [usingSample, setUsingSample] = useState(false);
   const [highlightedBlockerId, setHighlightedBlockerId] = useState<string>();
@@ -34,6 +38,7 @@ export default function Home() {
   const selectSpot = useCallback((nextSpot: Spot) => {
     setSpot(nextSpot);
     setUsingSample(false);
+    setSampleReason(undefined);
     setStatus("idle");
   }, []);
 
@@ -86,12 +91,13 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [spot, initializing, usingSample]);
+  }, [spot, initializing, usingSample, retryCount]);
 
   function useDemo() {
     setSpot(DEMO_SPOT);
     setBuildings(SAMPLE_BUILDINGS);
     setUsingSample(true);
+    setSampleReason("demo");
     setStatus("ready");
   }
 
@@ -99,16 +105,12 @@ export default function Home() {
     if (!spot) return;
     setBuildings(SAMPLE_BUILDINGS);
     setUsingSample(true);
+    setSampleReason("fallback");
     setStatus("ready");
   }
 
   const insideBuilding = Boolean(spot && buildings.length && isInsideBuilding(spot, buildings));
   const loading = Boolean(spot && !usingSample && status !== "ready" && status !== "error");
-  const daylightMinutes = useMemo(() => {
-    if (samples.length < 2) return 0;
-    return Math.round((samples.at(-1)!.time.getTime() - samples[0].time.getTime()) / 60_000);
-  }, [samples]);
-
   return (
     <main className="min-h-screen bg-[#f6f3ee] text-slate-950">
       <header className="border-b border-slate-200/80 bg-[#fffdf9]">
@@ -137,12 +139,13 @@ export default function Home() {
             </section>
           )}
           {loading && <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-slate-700">Checking nearby building footprints…</p><div className="mt-4 h-12 animate-pulse rounded-xl bg-slate-100" /></section>}
-          {spot && status === "error" && <section className="rounded-3xl border border-amber-200 bg-amber-50 p-5 shadow-sm"><p className="font-bold text-amber-950">Live building data unavailable.</p><p className="mt-1 text-sm text-amber-900">You can retry, or explore this spot with our clearly-labelled sample buildings.</p><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => { setUsingSample(false); setStatus("idle"); }} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-amber-950">Retry</button><button type="button" onClick={useSamples} className="rounded-lg bg-amber-800 px-3 py-2 text-sm font-bold text-white">Use sample buildings</button></div></section>}
-          {spot && usingSample && <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900">Live building data unavailable — showing sample buildings.</div>}
+          {spot && status === "error" && <section className="rounded-3xl border border-amber-200 bg-amber-50 p-5 shadow-sm"><p className="font-bold text-amber-950">Live building data unavailable.</p><p className="mt-1 text-sm text-amber-900">You can retry, or explore this spot with our clearly-labelled sample buildings.</p><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => { setUsingSample(false); setStatus("idle"); setRetryCount((count) => count + 1); }} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-amber-950">Retry</button><button type="button" onClick={useSamples} className="rounded-lg bg-amber-800 px-3 py-2 text-sm font-bold text-white">Use sample buildings</button></div></section>}
+          {spot && usingSample && sampleReason === "demo" && <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900">Demo spot — showing sample buildings, not real map data.</div>}
+          {spot && usingSample && sampleReason === "fallback" && <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900">Live building data unavailable — showing sample buildings.</div>}
           {spot && status === "ready" && buildings.length === 0 && <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-900">No buildings within 250 m in OpenStreetMap — this spot is in full sun all day (trees not counted).</div>}
           {insideBuilding && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-900">This point is inside a building — tap the street instead.</div>}
-          {spot && samples.length > 0 && <ShadeTimeline samples={samples} summary={summary} date={date} onDateChange={setDate} onHighlight={setHighlightedBlockerId} />}
-          {spot && status === "ready" && samples.length > 0 && <p className="px-1 text-xs text-slate-500">Timeline covers {Math.floor(daylightMinutes / 60)}h {daylightMinutes % 60}m of daylight. Calculations use building footprints and estimated heights; terrain and trees are not counted.</p>}
+          {spot && (status === "ready" || usingSample) && samples.length > 0 && <ShadeTimeline samples={samples} summary={summary} date={date} timeZone={timeZone} onDateChange={setDate} onHighlight={setHighlightedBlockerId} />}
+          {spot && (status === "ready" || usingSample) && samples.length > 0 && <p className="px-1 text-xs text-slate-500">Calculations use building footprints and estimated heights; terrain and trees are not counted.</p>}
           <SavedSpots spot={spot} date={date} shadedFractionPerHour={summary.shadedFractionPerHour} onOpen={selectSpot} />
         </div>
       </div>

@@ -6,6 +6,7 @@ import {
   LocalPoint,
 } from "./geo";
 import { SunSample } from "./sun";
+import { hourIn, zonedDate } from "./time";
 
 export type ShadeSample = {
   time: Date;
@@ -82,32 +83,31 @@ export function isInsideBuilding(
 export type ShadeSummary = {
   shadedMinutes: number;
   sunMinutes: number;
+  windowShadedMinutes: number;
   bestShadyWindow?: { start: Date; end: Date };
   shadedFractionPerHour: { hour: number; fraction: number }[];
 };
 
 export function summarize(
   samples: ShadeSample[],
+  local: { dateStr: string; tz: string },
   windowStart = 11,
   windowEnd = 19,
 ): ShadeSummary {
   if (samples.length < 1) {
-    return { shadedMinutes: 0, sunMinutes: 0, shadedFractionPerHour: [] };
+    return {
+      shadedMinutes: 0,
+      sunMinutes: 0,
+      windowShadedMinutes: 0,
+      shadedFractionPerHour: [],
+    };
   }
 
-  const first = samples[0].time;
-  const startBoundary = new Date(first);
-  startBoundary.setHours(windowStart, 0, 0, 0);
-  const endBoundary = new Date(first);
-  endBoundary.setHours(windowEnd, 0, 0, 0);
-  const intervals = samples.slice(0, -1).flatMap((sample, index) => {
-    const next = samples[index + 1];
-    const start = new Date(Math.max(sample.time.getTime(), startBoundary.getTime()));
-    const end = new Date(Math.min(next.time.getTime(), endBoundary.getTime()));
-    return end > start
-      ? [{ start, end, shaded: sample.shaded }]
-      : [];
-  });
+  const intervals = samples.slice(0, -1).map((sample, index) => ({
+    start: sample.time,
+    end: samples[index + 1].time,
+    shaded: sample.shaded,
+  }));
   const minutes = (start: Date, end: Date) =>
     Math.max(0, (end.getTime() - start.getTime()) / 60_000);
   const shadedMinutes = intervals
@@ -117,15 +117,27 @@ export function summarize(
     (total, interval) => total + minutes(interval.start, interval.end),
     0,
   );
+  const startBoundary = zonedDate(local.dateStr, windowStart, local.tz);
+  const endBoundary = zonedDate(local.dateStr, windowEnd, local.tz);
+  const windowIntervals = intervals.flatMap((interval) => {
+    const start = new Date(
+      Math.max(interval.start.getTime(), startBoundary.getTime()),
+    );
+    const end = new Date(Math.min(interval.end.getTime(), endBoundary.getTime()));
+    return end > start ? [{ start, end, shaded: interval.shaded }] : [];
+  });
+  const windowShadedMinutes = windowIntervals
+    .filter((interval) => interval.shaded)
+    .reduce((total, interval) => total + minutes(interval.start, interval.end), 0);
 
+  const firstHour = hourIn(samples[0].time, local.tz);
+  const lastHour = hourIn(samples.at(-1)!.time, local.tz);
   const shadedFractionPerHour = Array.from(
-    { length: Math.max(0, windowEnd - windowStart) },
+    { length: Math.max(0, lastHour - firstHour + 1) },
     (_, offset) => {
-      const hour = windowStart + offset;
-      const hourStart = new Date(first);
-      hourStart.setHours(hour, 0, 0, 0);
-      const hourEnd = new Date(hourStart);
-      hourEnd.setHours(hour + 1, 0, 0, 0);
+      const hour = firstHour + offset;
+      const hourStart = zonedDate(local.dateStr, hour, local.tz);
+      const hourEnd = zonedDate(local.dateStr, hour + 1, local.tz);
       const shaded = intervals
         .filter((interval) => interval.shaded)
         .reduce((total, interval) => {
@@ -143,7 +155,7 @@ export function summarize(
 
   let bestShadyWindow: ShadeSummary["bestShadyWindow"];
   let current: { start: Date; end: Date } | undefined;
-  for (const interval of intervals) {
+  for (const interval of windowIntervals) {
     if (interval.shaded) {
       current = current
         ? { start: current.start, end: interval.end }
@@ -171,6 +183,7 @@ export function summarize(
   return {
     shadedMinutes,
     sunMinutes: Math.max(0, totalMinutes - shadedMinutes),
+    windowShadedMinutes,
     ...(bestShadyWindow ? { bestShadyWindow } : {}),
     shadedFractionPerHour,
   };

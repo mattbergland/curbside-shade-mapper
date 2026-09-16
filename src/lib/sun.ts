@@ -1,4 +1,5 @@
 import * as SunCalc from "suncalc";
+import { zonedDate } from "./time";
 
 export type SunSample = {
   time: Date;
@@ -7,12 +8,13 @@ export type SunSample = {
 };
 
 export function getSunSamples(
-  date: Date,
+  dateStr: string,
   lat: number,
   lng: number,
+  timeZone: string,
   stepMinutes = 15,
 ): SunSample[] {
-  const times = SunCalc.getTimes(date, lat, lng);
+  const times = SunCalc.getTimes(zonedDate(dateStr, 12, timeZone), lat, lng);
   if (!times.sunrise || !times.sunset) return [];
   const sunrise = times.sunrise.getTime();
   const sunset = times.sunset.getTime();
@@ -24,11 +26,11 @@ export function getSunSamples(
     const position = SunCalc.getPosition(time, lat, lng);
     const altitude = (position.altitude * Math.PI) / 180;
     const azimuth = ((position.azimuth - 180) * Math.PI) / 180;
-    if (altitude > 0) {
+    if (altitude > 0 || timestamp === sunrise || timestamp === sunset) {
       samples.push({
         time,
         azimuth,
-        altitude,
+        altitude: Math.max(altitude, Number.EPSILON),
       });
     }
   }
@@ -38,13 +40,11 @@ export function getSunSamples(
     const position = SunCalc.getPosition(time, lat, lng);
     const altitude = (position.altitude * Math.PI) / 180;
     const azimuth = ((position.azimuth - 180) * Math.PI) / 180;
-    if (altitude > 0) {
-      samples.push({
-        time,
-        azimuth,
-        altitude,
-      });
-    }
+    samples.push({
+      time,
+      azimuth,
+      altitude: Math.max(altitude, Number.EPSILON),
+    });
   }
 
   return samples;
