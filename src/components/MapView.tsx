@@ -78,7 +78,9 @@ export default function MapView({
         const map = L.map(mapNode.current, {
           center: [DEMO_CENTER.lat, DEMO_CENTER.lng],
           zoom: 15,
+          zoomControl: false,
         });
+        L.control.zoom({ position: "bottomright" }).addTo(map);
         const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           maxZoom: 19,
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
