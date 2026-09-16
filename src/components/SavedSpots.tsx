@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { deleteSpot, getSavedSpots, saveSpot, SavedSpot } from "@/lib/storage";
+import { fmtHour } from "@/lib/time";
 
 type Props = {
   spot?: { lat: number; lng: number };
@@ -41,7 +42,7 @@ export default function SavedSpots({ spot, date, shadedFractionPerHour, onOpen }
           {saved.map((item) => (
             <li key={item.id} className="flex flex-wrap items-center gap-3 py-3 first:pt-1">
               <div className="min-w-0 flex-1"><p className="truncate font-semibold text-slate-900">{item.name}</p><p className="text-xs text-slate-500">{item.lat.toFixed(4)}, {item.lng.toFixed(4)}</p></div>
-              <div className="flex h-5 w-20 items-end gap-px" aria-label="Saved shade snapshot">{(item.snapshot?.shadedFractionPerHour ?? []).map((hour) => <i key={hour.hour} className="min-w-1 flex-1 rounded-t bg-sky-400" style={{ height: `${Math.max(15, hour.fraction * 100)}%` }} />)}</div>
+              <div className="flex h-5 w-20 items-end gap-px" aria-label="Saved shade snapshot">{(item.snapshot?.shadedFractionPerHour ?? []).map((hour) => <i key={hour.hour} title={`${fmtHour(hour.hour)}: ${Math.round(hour.fraction * 100)}% shade`} className="min-w-1 flex-1 rounded-t bg-sky-400" style={{ height: `${Math.max(15, hour.fraction * 100)}%` }} />)}</div>
               <button type="button" onClick={() => onOpen({ lat: item.lat, lng: item.lng })} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:border-orange-400 hover:text-orange-700">Open</button>
               <button type="button" onClick={() => setSaved(deleteSpot(item.id))} className="rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-500 hover:bg-red-50 hover:text-red-700">Delete</button>
             </li>
