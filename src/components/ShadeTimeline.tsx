@@ -72,8 +72,8 @@ export default function ShadeTimeline({
         Shady {formatMinutes(summary.shadedMinutes)} of {formatMinutes(daylightMinutes)} daylight · Selling hours (11 AM–7 PM): {formatMinutes(summary.windowShadedMinutes)} shady · Best shady window {bestWindow}
       </p>
       <div className="mt-5 overflow-x-auto pb-1">
-        <div className="min-w-[560px]">
-          <div className="flex gap-0.5" aria-label="15-minute sun and shade timeline">
+        <div className="relative min-w-[560px] pb-5">
+          <div className="flex" aria-label="15-minute sun and shade timeline">
             {samples.slice(0, -1).map((sample, index) => (
               <button
                 key={sample.time.toISOString()}
@@ -82,19 +82,19 @@ export default function ShadeTimeline({
                 onFocus={() => onHighlight(sample.blockerId)}
                 onMouseEnter={() => onHighlight(sample.blockerId)}
                 onMouseLeave={() => onHighlight(undefined)}
-                className={`h-10 min-w-[10px] flex-1 rounded-sm border border-white/60 transition-transform hover:scale-y-110 focus:z-10 focus:scale-y-110 focus:outline-none focus:ring-2 focus:ring-slate-900 ${sample.shaded ? "bg-sky-400" : "bg-amber-300"}`}
+                className={`h-10 min-w-0 flex-1 rounded-sm border border-white transition-transform hover:scale-y-110 focus:z-10 focus:scale-y-110 focus:outline-none focus:ring-2 focus:ring-slate-900 ${sample.shaded ? "bg-sky-400" : "bg-amber-300"}`}
               >
                 <span className="sr-only">{index}</span>
               </button>
             ))}
           </div>
-          <div className="relative mt-2 h-5 text-[11px] font-semibold text-slate-500">
+          <div className="absolute inset-x-0 top-11 h-5 text-[11px] font-semibold text-slate-500">
             {labels.map((hour) => {
               const hourInstant = zonedDate(date, hour, timeZone);
               const position = sunrise && sunset
                 ? ((hourInstant.getTime() - sunrise.getTime()) / (sunset.getTime() - sunrise.getTime())) * 100
                 : 0;
-              return <span key={hour} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: `${Math.max(0, Math.min(100, position))}%` }}>{fmtHour(hour)}</span>;
+              return <span key={hour} className={`absolute whitespace-nowrap ${position > 92 ? "-translate-x-full" : "-translate-x-1/2"}`} style={{ left: `${Math.max(0, Math.min(100, position))}%` }}>{fmtHour(hour)}</span>;
             })}
           </div>
         </div>
