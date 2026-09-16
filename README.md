@@ -15,6 +15,7 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 ## Data sources and limits
 
+- The interactive map uses Leaflet with OpenStreetMap raster tiles.
 - Building footprints come from OpenStreetMap through the Overpass API.
 - A tagged building height is used when available; `building:levels` is converted using 3.2 m per level; otherwise the app assumes 10 m.
 - The demo buildings are synthetic and are clearly labelled in the app.

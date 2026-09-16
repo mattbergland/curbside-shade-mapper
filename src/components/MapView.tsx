@@ -1,8 +1,9 @@
 "use client";
 
-import "maplibre-gl/dist/maplibre-gl.css";
+import "leaflet/dist/leaflet.css";
 import { useEffect, useRef, useState } from "react";
 import type { Building } from "@/lib/buildings";
+import type { Feature, FeatureCollection, Polygon } from "geojson";
 
 type Spot = { lat: number; lng: number };
 type SearchResult = { label: string; lat: number; lng: number };
@@ -16,6 +17,13 @@ type Props = {
 
 const DEMO_CENTER = { lat: 40.742, lng: -73.9897 };
 
+const buildingStyle = (height: number) => ({
+  color: height > 25 ? "#395267" : height >= 12 ? "#526b82" : "#8198ad",
+  weight: 1,
+  fillColor: height > 25 ? "#536b82" : height >= 12 ? "#8198ad" : "#b8c8d8",
+  fillOpacity: 0.68,
+});
+
 export default function MapView({
   spot,
   buildings,
@@ -23,126 +31,146 @@ export default function MapView({
   onSpotChange,
 }: Props) {
   const mapNode = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<import("maplibre-gl").Map | null>(null);
-  const markerRef = useRef<import("maplibre-gl").Marker | null>(null);
+  const mapRef = useRef<import("leaflet").Map | null>(null);
+  const leafletRef = useRef<typeof import("leaflet") | null>(null);
+  const markerRef = useRef<import("leaflet").Marker | null>(null);
+  const buildingLayerRef = useRef<import("leaflet").GeoJSON | null>(null);
+  const highlightLayerRef = useRef<import("leaflet").GeoJSON | null>(null);
+  const spotRef = useRef(spot);
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [activeResult, setActiveResult] = useState(0);
+  const [mapMessage, setMapMessage] = useState<string>();
+
+  function syncMarker(
+    L: typeof import("leaflet"),
+    map: import("leaflet").Map,
+    nextSpot: Spot,
+  ) {
+    map.flyTo([nextSpot.lat, nextSpot.lng], Math.max(map.getZoom(), 15), { duration: 0.5 });
+    if (markerRef.current) {
+      markerRef.current.setLatLng([nextSpot.lat, nextSpot.lng]);
+      return;
+    }
+    const icon = L.divIcon({
+      className: "",
+      html: '<div style="width:18px;height:18px;border:3px solid white;border-radius:9999px;background:#f97316;box-shadow:0 1px 4px rgba(15,23,42,.45)"></div>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
+    markerRef.current = L.marker([nextSpot.lat, nextSpot.lng], { icon }).addTo(map);
+  }
+
+  useEffect(() => {
+    spotRef.current = spot;
+  }, [spot]);
 
   useEffect(() => {
     let disposed = false;
+
     async function initialize() {
       if (!mapNode.current || mapRef.current) return;
-      const maplibregl = await import("maplibre-gl");
-      if (disposed || !mapNode.current) return;
-      const map = new maplibregl.Map({
-        container: mapNode.current,
-        center: [DEMO_CENTER.lng, DEMO_CENTER.lat],
-        zoom: 15,
-        style: {
-          version: 8,
-          sources: {
-            osm: {
-              type: "raster",
-              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-              tileSize: 256,
-              attribution: "© OpenStreetMap contributors",
-            },
-          },
-          layers: [{ id: "osm", type: "raster", source: "osm" }],
-        },
-      });
-      map.on("load", () => {
-        map.addSource("buildings", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        map.addLayer({
-          id: "building-fills",
-          type: "fill",
-          source: "buildings",
-          paint: {
-            "fill-color": [
-              "step",
-              ["get", "height"],
-              "#b8c8d8",
-              12,
-              "#8198ad",
-              25,
-              "#536b82",
-            ],
-            "fill-opacity": 0.68,
-            "fill-outline-color": "#395267",
-          },
+      try {
+        const L = await import("leaflet");
+        if (disposed || !mapNode.current) return;
+
+        const map = L.map(mapNode.current, {
+          center: [DEMO_CENTER.lat, DEMO_CENTER.lng],
+          zoom: 15,
         });
-        map.addSource("highlighted-building", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        map.addLayer({
-          id: "highlighted-building-fill",
-          type: "fill",
-          source: "highlighted-building",
-          paint: {
-            "fill-color": "#f97316",
-            "fill-opacity": 0.78,
-            "fill-outline-color": "#9a3412",
-          },
+        const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(map);
+        let tileErrors = 0;
+        let tileLoaded = false;
+        tiles.on("tileload", () => {
+          tileLoaded = true;
         });
+        tiles.on("tileerror", () => {
+          tileErrors += 1;
+          if (!tileLoaded && tileErrors >= 3) {
+            setMapMessage("Map tiles couldn't load — you can still search an address or use your location.");
+          }
+        });
+
+        const buildingLayer = L.geoJSON(undefined, {
+          style: (feature) => buildingStyle(Number(feature?.properties?.height ?? 0)),
+        }).addTo(map);
+        const highlightLayer = L.geoJSON(undefined, {
+          style: {
+            color: "#9a3412",
+            weight: 1,
+            fillColor: "#f97316",
+            fillOpacity: 0.78,
+          },
+        }).addTo(map);
+
         map.on("click", (event) => {
-          if (!event.originalEvent?.isTrusted) return;
-          onSpotChange({ lat: event.lngLat.lat, lng: event.lngLat.lng });
+          onSpotChange({ lat: event.latlng.lat, lng: event.latlng.lng });
         });
-      });
-      mapRef.current = map;
+        mapRef.current = map;
+        leafletRef.current = L;
+        buildingLayerRef.current = buildingLayer;
+        highlightLayerRef.current = highlightLayer;
+        if (spotRef.current) {
+          syncMarker(L, map, spotRef.current);
+        }
+        requestAnimationFrame(() => map.invalidateSize());
+      } catch {
+        setMapMessage("The map couldn't start in this browser — you can still search an address or use your location.");
+      }
     }
+
     void initialize();
     return () => {
       disposed = true;
       mapRef.current?.remove();
       mapRef.current = null;
+      leafletRef.current = null;
+      markerRef.current = null;
+      buildingLayerRef.current = null;
+      highlightLayerRef.current = null;
     };
   }, [onSpotChange]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    const source = map.getSource("buildings") as import("maplibre-gl").GeoJSONSource | undefined;
-    if (source) {
-      source.setData({
-        type: "FeatureCollection",
-        features: buildings.map((building) => ({
-          type: "Feature",
-          id: building.id,
-          properties: { height: building.height, name: building.name ?? "" },
-          geometry: { type: "Polygon", coordinates: [building.footprint] },
-        })),
-      });
-    }
+    const layer = buildingLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+    const featureCollection: FeatureCollection<Polygon> = {
+      type: "FeatureCollection",
+      features: buildings.map((building) => ({
+        type: "Feature",
+        id: building.id,
+        properties: { height: building.height, name: building.name ?? "" },
+        geometry: { type: "Polygon", coordinates: [building.footprint] },
+      })),
+    };
+    layer.addData(featureCollection);
+  }, [buildings]);
+
+  useEffect(() => {
+    const layer = highlightLayerRef.current;
+    if (!layer) return;
     const highlighted = buildings.find((building) => building.id === highlightedBlockerId);
-    const highlightSource = map.getSource("highlighted-building") as import("maplibre-gl").GeoJSONSource | undefined;
-    if (highlightSource) {
-      highlightSource.setData({
-        type: "FeatureCollection",
-        features: highlighted
-          ? [{
-              type: "Feature",
-              properties: { height: highlighted.height },
-              geometry: { type: "Polygon", coordinates: [highlighted.footprint] },
-            }]
-          : [],
-      });
+    layer.clearLayers();
+    if (highlighted) {
+      const feature: Feature<Polygon> = {
+        type: "Feature",
+        properties: { height: highlighted.height },
+        geometry: { type: "Polygon", coordinates: [highlighted.footprint] },
+      };
+      layer.addData(feature);
     }
   }, [buildings, highlightedBlockerId]);
 
   useEffect(() => {
-    if (!spot || !mapRef.current) return;
     const map = mapRef.current;
-    map.flyTo({ center: [spot.lng, spot.lat], zoom: Math.max(map.getZoom(), 15), duration: 500 });
-    if (markerRef.current) markerRef.current.setLngLat([spot.lng, spot.lat]);
-    else {
-      import("maplibre-gl").then((maplibregl) => {
-        if (!mapRef.current) return;
-        markerRef.current = new maplibregl.Marker({ color: "#f97316" })
-          .setLngLat([spot.lng, spot.lat])
-          .addTo(mapRef.current);
-      });
-    }
+    const L = leafletRef.current;
+    if (!map || !L || !spot) return;
+    syncMarker(L, map, spot);
   }, [spot]);
 
   async function searchPlaces() {
@@ -167,7 +195,8 @@ export default function MapView({
   return (
     <section className="relative h-full min-h-[360px] overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 shadow-sm">
       <div ref={mapNode} className="absolute inset-0" aria-label="Map for choosing a curbside spot" />
-      <div className="absolute left-4 right-4 top-4 z-10 flex gap-2">
+      {mapMessage && <div className="absolute left-4 right-4 bottom-4 z-[1100] rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950 shadow-lg">{mapMessage}</div>}
+      <div className="absolute left-4 right-4 top-4 z-[1100] flex gap-2">
         <div className="relative min-w-0 flex-1">
           <div className="flex rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
             <input
@@ -184,6 +213,7 @@ export default function MapView({
                   event.preventDefault();
                   chooseResult(results[activeResult]);
                 } else if (event.key === "Enter") {
+                  event.preventDefault();
                   void searchPlaces();
                 } else if (event.key === "Escape") {
                   setResults([]);
@@ -217,7 +247,7 @@ export default function MapView({
           <span className="hidden sm:inline">◎ </span>My location
         </button>
       </div>
-      <div className="absolute bottom-4 left-4 z-10 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-700 shadow-lg backdrop-blur">
+      <div className="absolute bottom-4 left-4 z-[1100] rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-700 shadow-lg backdrop-blur">
         <div className="mb-1 font-bold text-slate-900">Map legend</div>
         <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-[#b8c8d8]" /> Under 12 m</div>
         <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-[#8198ad]" /> 12–25 m</div>
